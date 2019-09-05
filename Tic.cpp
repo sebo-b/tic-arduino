@@ -1,5 +1,151 @@
-#include <Tic.h>
-#include <Arduino.h>
+
+#include "Tic.h"
+#include <string.h>
+
+
+// ---------------------------------------
+
+class SerialStream: public Stream {
+  int fd;
+public:
+  SerialStream(const char* dev);
+  ~SerialStream();
+  size_t write(uint8_t byte);
+  size_t readBytes(char *buffer, size_t length);
+};
+
+#include <fcntl.h>
+#include <termios.h>
+#include <stdio.h>
+
+SerialStream::SerialStream(const char* dev) {
+
+  fd = open(dev,O_RDWR|O_NOCTTY/*|O_SYNC*/);
+
+  if (fd == -1)
+    return;
+  
+  printf("Open succ\n");
+
+  struct termios settings;
+  tcgetattr(fd, &settings);
+
+  cfsetospeed(&settings, B9600); /* baud rate */
+  settings.c_cflag &= ~PARENB; /* no parity */
+  settings.c_cflag &= ~CSTOPB; /* 1 stop bit */
+  settings.c_cflag &= ~CSIZE;
+  settings.c_cflag |= CS8 | CLOCAL; /* 8 bits */
+  settings.c_lflag &= ~ICANON; /* canonical mode */
+  settings.c_oflag &= ~OPOST; /* raw output */
+
+  tcsetattr(fd, TCSANOW, &settings); /* apply the settings */
+  tcflush(fd, TCOFLUSH);
+  printf("flush\n");
+}
+
+SerialStream::~SerialStream() {
+  if (fd != -1)
+    close(fd);
+}
+size_t SerialStream::write(uint8_t byte) {
+  printf("write %0x\n",byte);
+  size_t ret = ::write(fd,&byte,sizeof(byte));
+  printf("written %d\n",ret);
+  return ret;
+}
+size_t SerialStream::readBytes(char *buffer, size_t length) {
+  printf("read request len = %d\n",length);  
+  size_t ret = ::read(fd, buffer, length);
+  printf("read %d bytes\n",ret);
+  return ret;
+}
+
+// ---------------------------------------
+#include <libusb.h>
+class TicUsb: public TicBase {
+  libusb_device_handle *handle;
+public:
+  TicUsb();
+  ~TicUsb();
+
+  void commandQuick(TicCommand cmd);
+  void commandW32(TicCommand cmd, uint32_t val);
+  void commandW7(TicCommand cmd, uint8_t val);
+  void getSegment(TicCommand cmd, uint8_t offset, uint8_t length, void * buffer);
+
+
+};
+
+#define TIC_VENDOR_ID 0x1FFB
+#define TIC_PRODUCT_ID_T825 0x00B3
+#define TIC_PRODUCT_ID_T834 0x00B5
+#define TIC_PRODUCT_ID_T500 0x00BD
+#define TIC_PRODUCT_ID_N825 0x00C3
+#define TIC_PRODUCT_ID_T249 0x00C9
+
+TicUsb::TicUsb() {
+  libusb_init(NULL);
+
+  libusb_device** devs;
+  ssize_t len = libusb_get_device_list(NULL, &devs);
+
+  libusb_device** dev = NULL;
+  for (dev = devs; *dev != NULL; ++dev) {
+    struct libusb_device_descriptor desc;
+    libusb_get_device_descriptor(*dev, &desc);
+    if (desc.idVendor == TIC_VENDOR_ID && desc.idProduct == TIC_PRODUCT_ID_T825) {
+      printf("Found USB\n");
+      break;
+    }
+  }
+
+  if (dev && *dev) {
+    libusb_open(*dev, &handle);
+  }
+
+  libusb_free_device_list(devs,1);
+
+}
+TicUsb::~TicUsb() {
+  libusb_close(handle);
+  libusb_exit(NULL);
+}
+
+void TicUsb::commandQuick(TicCommand cmd)  {
+
+}
+void TicUsb::commandW32(TicCommand cmd, uint32_t val)  {
+
+}
+void TicUsb::commandW7(TicCommand cmd, uint8_t val)  {
+
+}
+void TicUsb::getSegment(TicCommand cmd, uint8_t offset, uint8_t length, void * buffer)  {
+
+  libusb_control_transfer(handle, 0xC0, (uint8_t)cmd, 0, offset, (unsigned char*)buffer, length, 0);
+}
+
+
+// ---------------------------------------
+#include <stdio.h>
+int main() {
+
+//  TicUsb tusb;
+//  uint16_t cl = tusb.getCurrentLimit();
+//  printf("%d",cl);
+
+  SerialStream ss("/dev/stdout");
+  TicSerial ts(ss);
+
+  ts.reset();
+  uint16_t cl = ts.getCurrentLimit();
+
+  printf("%d",cl);
+
+	return 0;
+}
+
+// ---------------------------------------
 
 static const uint16_t Tic03aCurrentTable[33] =
 {
@@ -157,62 +303,3 @@ void TicSerial::sendCommandHeader(TicCommand cmd)
   _lastError = 0;
 }
 
-/**** TicI2C ****/
-
-void TicI2C::commandQuick(TicCommand cmd)
-{
-  Wire.beginTransmission(_address);
-  Wire.write((uint8_t)cmd);
-  _lastError = Wire.endTransmission();
-}
-
-void TicI2C::commandW32(TicCommand cmd, uint32_t val)
-{
-  Wire.beginTransmission(_address);
-  Wire.write((uint8_t)cmd);
-  Wire.write(val >> 0); // lowest byte
-  Wire.write(val >> 8);
-  Wire.write(val >> 16);
-  Wire.write(val >> 24); // highest byte
-  _lastError = Wire.endTransmission();
-}
-
-void TicI2C::commandW7(TicCommand cmd, uint8_t val)
-{
-  Wire.beginTransmission(_address);
-  Wire.write((uint8_t)cmd);
-  Wire.write(val & 0x7F);
-  _lastError = Wire.endTransmission();
-}
-
-void TicI2C::getSegment(TicCommand cmd, uint8_t offset,
-  uint8_t length, void * buffer)
-{
-  Wire.beginTransmission(_address);
-  Wire.write((uint8_t)cmd);
-  Wire.write(offset);
-  _lastError = Wire.endTransmission(false); // no stop (repeated start)
-  if (_lastError)
-  {
-    // Set the buffer bytes to 0 so the program will not use an uninitialized
-    // variable.
-    memset(buffer, 0, length);
-    return;
-  }
-
-  uint8_t byteCount = Wire.requestFrom(_address, (uint8_t)length);
-  if (byteCount != length)
-  {
-    _lastError = 50;
-    memset(buffer, 0, length);
-    return;
-  }
-
-  _lastError = 0;
-  uint8_t * ptr = (uint8_t *)buffer;
-  for (uint8_t i = 0; i < length; i++)
-  {
-    *ptr = Wire.read();
-    ptr++;
-  }
-}

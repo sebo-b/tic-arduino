@@ -10,9 +10,9 @@
 
 #pragma once
 
-#include <Arduino.h>
-#include <Stream.h>
-#include <Wire.h>
+#include <stdint.h>
+#include <unistd.h>
+#include "Stream.h"
 
 enum class TicProduct
 {
@@ -512,7 +512,7 @@ public:
 
     // The Tic's serial and I2C interfaces will be unreliable for a brief period
     // after the Tic receives the Reset command, so we delay 10 ms here.
-    delay(10);
+    usleep(10);
   }
 
   /// Attempts to clear a motor driver error.
@@ -1322,7 +1322,7 @@ private:
   virtual void commandW32(TicCommand cmd, uint32_t val) = 0;
   virtual void commandW7(TicCommand cmd, uint8_t val) = 0;
   virtual void getSegment(TicCommand cmd, uint8_t offset,
-    uint8_t length, void * buffer);
+    uint8_t length, void * buffer) = 0;
 
   TicProduct product = TicProduct::Unknown;
 };
@@ -1384,33 +1384,3 @@ private:
   void serialW7(uint8_t val) { _stream->write(val & 0x7F); }
 };
 
-/// Represents an I2C connection to a Tic.
-///
-/// For the high-level commands you can use on this object, see TicBase.
-class TicI2C : public TicBase
-{
-public:
-  /// Creates a new TicI2C object that will use the `Wire` object to communicate
-  /// with the Tic over I2C.
-  ///
-  /// The `address` parameter specifies the 7-bit I2C address to use, and it
-  /// must match the Tic's "Device number" setting.  It defaults to 14.
-  TicI2C(uint8_t address = 14) : _address(address)
-  {
-  }
-
-  // TODO: support Wire1 on Arduino Due, and bit-banging I2C on any board?
-
-  /// Gets the I2C address specified in the constructor.
-  uint8_t getAddress() { return _address; }
-
-private:
-  const uint8_t _address;
-
-  void commandQuick(TicCommand cmd);
-  void commandW32(TicCommand cmd, uint32_t val);
-  void commandW7(TicCommand cmd, uint8_t val);
-  void getSegment(TicCommand cmd, uint8_t offset,
-    uint8_t length, void * buffer);
-  void delayAfterRead();
-};

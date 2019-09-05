@@ -1,3 +1,6 @@
+
+# Library modified to make it possible to compile and use in regular Linux
+
 # Tic Stepper Motor Controller library for Arduino
 
 Version: 2.0.0<br>
